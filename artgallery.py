@@ -18,6 +18,7 @@ import rasterio
 from bisect import bisect
 
 
+
 __author__ = 'Gero Nootz'
 __copyright__ = ''
 __credits__ = ['', '']
@@ -27,6 +28,8 @@ __date__ = '12/26/2021'
 __maintainer__ = 'Gero Nootz'
 __email__ = 'gero.nootz@usm.edu'
 __status__ = 'Prototype'
+
+lock = threading.Lock()
 
 
 class Add_del_art(Enum):
@@ -126,7 +129,6 @@ class Gallerist(queue.Queue):
         print('init_func called')
         # print(self.init_artists)
         return self.init_artists
-
 
 class Artist(ABC):
     """

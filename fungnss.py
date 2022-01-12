@@ -9,17 +9,8 @@ __email__ = 'sanjib.sarkar@usm.edu'
 __status__ = 'Prototype'
 
 import re
-import time
-import warnings
-from time import monotonic
-import geopy.distance
-import numpy as np
-import numpy.polynomial.polynomial as poly
-import pandas as pd
-import pymap3d as pm
-import serial
+
 from geographiclib.geodesic import Geodesic
-from scipy import stats
 
 
 def check_sum(instruction):
@@ -91,3 +82,25 @@ def dd2ddm(coordinates):
     ddm = {'Lat_ddm': lat_ddm, 'N_S': 'S' if lat_sign else 'N',
            'Lng_ddm': lng_ddm, 'E_W': 'W' if lng_sign else 'E'}
     return ddm
+
+
+def speed_heading_cal(coor1_withtime, coor2_withtime) -> dict:
+    """ Return heading angle, speed, and distance;
+    input:coordinates with timestamp: ['30.35059', '-89.62995', '104139'],
+                                      ['30.35059', '-89.62995', '104139'] """
+
+    geod = Geodesic(6378388, 1 / 297.0)
+    lat_co1, lng_co1, t_co1 = coor1_withtime[0], coor1_withtime[1], str(coor1_withtime[-1])
+    lat_co2, lng_co2, t_co2 = coor2_withtime[0], coor2_withtime[1], str(coor2_withtime[-1])
+    d = geod.Inverse(float(lat_co1), float(lng_co1), float(lat_co2), float(lng_co2))
+    distance = d['s12']
+    ha = d['azi2']
+    time_diff = (int(t_co2[0:2]) * 3600 + int(t_co2[2:4]) * 60 + float(t_co2[4:])) - \
+                (int(t_co1[0:2]) * 3600 + int(t_co1[2:4]) * 60 + float(t_co1[4:]))
+    try:
+        speed = distance / time_diff
+        result = {'speed': speed, 'ha': ha, 'dis12': distance}
+    except ZeroDivisionError:
+        print('Time difference between two coordinates is zero.')
+        result = None
+    return result

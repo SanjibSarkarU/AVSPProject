@@ -7,6 +7,7 @@ import logging
 import socket
 from queue import Queue
 import artgallery as ag
+import fungnss
 import fungnss as fg
 
 __author__ = 'Sanjib Sarkar'
@@ -28,51 +29,65 @@ sock.bind((UDP_IP, UDP_PORT))
 q_co_lvs = Queue()
 
 
-def coordinates():
+def coordinates_wamv():
     while True:
         try:
-            data, addr = sock.recvfrom(1350)  # buffer size is 1024
+            # print('inside coordinates')
+            data, addr = sock.recvfrom(1350)  # correct the comment :buffer size is 1024
             data = data.decode()
-            coordinate = fg.gpglldecode(data)
-            lat_w_c, lng_w_c, tme = coordinate['Lat_dd'], coordinate['Lng_dd'], coordinate['time']
-            q_co_lvs.put({'lat': lat_w_c, 'lng': lng_w_c, 'tme': tme})
         except Exception as e:
             print('Exception at coordinates function', e)
+            continue
+        coordinate = fg.gpglldecode(data)
+        lat, lng, tme = coordinate['Lat_dd'], coordinate['Lng_dd'], coordinate['time']
+        q_co_lvs.put({'lat': lat, 'lng': lng, 'tme': tme})
+        print({'lat': lat, 'lng': lng, 'tme': tme})
 
 
 def lvs():
+    latlng_lead = []
+    timespan = 6
     time.sleep(2)
     iver_art = ag.ImageArtist(gal, label='wam-v animation', alpha=1, zorder=4)
     trace_art = ag.LineArtist(gal, label='vam-v trace', c='g', alpha=0.6, zorder=3)
     icon_size = 0.02
     iver_art.add_data_to_artist('WAM-V_icon_small.png', icon_size, (0, 0), 0)
     while True:
-        lead_coordinate = q_co_lvs.get()
-        x_pos, y_pos = lead_coordinate['lng'], lead_coordinate['lat']
-        new_xy = (x_pos, y_pos)
-        deg = 65  # * (math.cos(2 * (math.pi / x_range) * (x_pos - iver_art.ax.get_xlim()[0])) - 90)
-        iver_art.set_position(new_xy, deg)
+        lead_loc = q_co_lvs.get()
+        latlng_lead.append([lead_loc['lat'], lead_loc['lng'], lead_loc['tme']])
+        if len(latlng_lead) >= timespan:
+            pass
+        new_x_lng, new_y_lat, new_t = latlng_lead[-1][1], latlng_lead[-1][0], latlng_lead[-1][2]
+        new_xy = ( new_y_lat, new_x_lng, new_t)
+        past_x_lng = latlng_lead[-2][1] if len(latlng_lead) > 2 else 0.00
+        past_y_lat = latlng_lead[-2][0] if len(latlng_lead) > 2 else 0.00
+        past_t = latlng_lead[-2][2] if len(latlng_lead) > 2 else 0.00
+        past_xy = (past_y_lat, past_x_lng, past_t)
+        deg_ = fungnss.speed_heading_cal(past_xy, new_xy)
+        deg = deg_['ha']  # 65  * (math.cos(2 * (math.pi / x_range) * (x_pos - iver_art.ax.get_xlim()[0])) - 90)
+        print('Ha:', deg)
+        iver_art.set_position((new_x_lng, new_y_lat), deg=10)
         trace_art.add_data_to_artist(new_xy)
-        # i += 0.01
-        # if (x_pos - iver_art.ax.get_xlim()[0]) > x_range:
-        #     trace_art.clear_data()
-        #     i = 0
         time.sleep(0.1)
 
 
-def plot_geotif():
-    """Work in progress..."""
-    sat = ag.GeoTifArtist(gal, label='Sat plot', zorder=5, alpha=1, add_artist_to_init_func=True)
-    sat.add_data_to_artist('Cat_Island_Low_2.tif')
+class PlotGeotif(threading.Thread):
+    def __init__(self):
+       threading.Thread.__init__(self, daemon=True)
 
-    noaachart = ag.GeoTifArtist(gal, label='Cat Island ENC', zorder=6, alpha=0.6, add_artist_to_init_func=True)
-    noaachart.add_data_to_artist('Cat_Island_ENC.tif')
+    def run(self):
+            """Work in progress..."""
+            satimage = ag.GeoTifArtist(gal, label='Sat plot', zorder=5, alpha=1, add_artist_to_init_func=True)
+            satimage.add_data_to_artist('Cat_Island_Low_2.tif')
 
-    sat.set_xlim(sat.geotif_xlim[0], sat.geotif_xlim[1])
-    sat.set_ylim(sat.geotif_ylim[0], sat.geotif_ylim[1])
+            noaachart = ag.GeoTifArtist(gal, label='Cat Island ENC', zorder=6, alpha=0.6, add_artist_to_init_func=True)
+            noaachart.add_data_to_artist('Cat_Island_ENC.tif')
 
-    while True:
-        time.sleep(5)
+            satimage.set_xlim(satimage.geotif_xlim[0], satimage.geotif_xlim[1])
+            satimage.set_ylim(satimage.geotif_ylim[0], satimage.geotif_ylim[1])
+
+            while True:
+                time.sleep(10)
 
 
 def _quit():
@@ -112,8 +127,8 @@ if __name__ == '__main__':
     # Using init function is much faster in terms of updating but slower to rescale. It also is not stable!!!
     anim = animation.FuncAnimation(gal.fig, gal.animate, init_func=gal.init_func, interval=100, blit=True)
 
-    threading.Thread(target=plot_geotif, daemon=True).start()
-    threading.Thread(target=coordinates, daemon=True).start()
+    PlotGeotif().start()
+    threading.Thread(target=coordinates_wamv, daemon=True).start()
     threading.Thread(target=lvs, daemon=True).start()
     tk.mainloop()
 
