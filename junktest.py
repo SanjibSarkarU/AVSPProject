@@ -1,8 +1,15 @@
+import logging
+import time
 import numpy as np
 import pymap3d as pm
 from scipy import stats
 from geographiclib.geodesic import Geodesic
 import artgallery as ag
+import tkinter as tk
+from matplotlib import (pyplot as plt, animation)
+import threading
+from matplotlib.backends.backend_tkagg import (
+    FigureCanvasTkAgg, NavigationToolbar2Tk)
 
 
 def point_on_line(a, b, p):
@@ -20,15 +27,21 @@ def heading(x, y):
         heading.e = heading.n = heading.u = np.empty(y) * np.nan
         heading.h = np.zeros(y)
     heading.data[0] = x
-    heading.lat0, heading.ln0 = heading.data[heading.count][0], heading.data[heading.count][1]
-    ' Convert to cartesian coordinate'
-    heading.e[0], heading.n[0], heading.u[0] = pm.geodetic2enu(
-        heading.data[0][0], heading.data[0][1], heading.h[heading.count],
-        heading.lat0, heading.ln0, heading.h[heading.count], ell=None, deg=True)
+    al = 0
+    while al <= heading.count:
+        heading.lat0, heading.ln0 = heading.data[heading.count][0], heading.data[heading.count][1]
+        ' Convert to cartesian coordinate'
+        heading.e[0], heading.n[0], heading.u[0] = pm.geodetic2enu(
+            heading.data[0][0], heading.data[0][1], heading.h[heading.count],
+            heading.lat0, heading.ln0, heading.h[heading.count], ell=None, deg=True)
+        heading.e = np.roll(heading.e, 1)
+        heading.n = np.roll(heading.n, 1)
+        heading.u = np.roll(heading.u, 1)
+        al += 1
     lat1, lng1 = heading.data[0][0], heading.data[0][1]
     lat2, lng2 = heading.data[heading.count][0], heading.data[heading.count][1]
 
-    if heading.count > 1:
+    if heading.count > 2:
         p1 = np.array([heading.e[0], heading.n[0]])
         p2 = np.array([heading.e[heading.count], heading.n[heading.count]])
         # heading.e = heading.e[~np.isnan(heading.e)]
@@ -49,7 +62,7 @@ def heading(x, y):
         lat2, lng2, _h2 = pm.enu2geodetic(x_2, y_2, heading.h[heading.count], heading.lat0, heading.ln0,
                                           heading.h[heading.count], ell=None, deg=True)
     tme_start = str(heading.data[heading.count][-1])
-    tme_last =  str(heading.data[0][-1])
+    tme_last = str(heading.data[0][-1])
     d = geod.Inverse(float(lat1), float(lng1), float(lat2), float(lng2))
     distance = d['s12']
     ha = d['azi2']
@@ -66,22 +79,71 @@ def heading(x, y):
               'speed': speed, 'ha': ha, 'dis12': distance}
 
     heading.data = np.roll(heading.data, 1, axis=0)  # roll trough axis
-    heading.e = np.roll(heading.e, 1)
-    heading.n = np.roll(heading.n, 1)
-    heading.u = np.roll(heading.u, 1)
+
     heading.count = heading.count if heading.count >= y-1 else heading.count + 1
     return result
 
 
-if __name__ == '__main__':
-    # for i in range(1, 10):
-    #     print(heading(x=[i, i + 2, i + 3], y=3))
-    import pandas as pd
-
+def test_fit():
     daa = pd.read_csv('20220104-212027-UTC_0-CAT3-IVER3-3089.log', header=0, delimiter=';')
     lat = daa['Latitude']
     lng = daa['Longitude']
     tme = daa['Time']
 
-    for i in range(1, 20):
-        print(heading(x=[lat[i], lng[i], ''.join(tme[i].split(':'))], y=9))
+    sctter_ori = ag.ScatterArtist(gal, s=60, marker='o',  label='original location')
+    sctter_fit_a = ag.ScatterArtist(gal, s=60, marker='*', label='after fitting')
+    sctter_fit_b = ag.ScatterArtist(gal, s=60, marker='*', label='after fitting')
+    # sctter_ori.set_xlim(min=lng[0], max=lng[len(lng)-1])
+    # sctter_ori.set_ylim(min=lat[0], max=lat[len(lat)-1])
+    # sctter_ori.set_xlim(min=-89.0815868500, max=-89.08149442350692)
+    # sctter_ori.set_ylim(min=30.2601162000, max=30.260170774102900)
+    sctter_ori.set_xlim(min=-89.0815869500, max=-89.08135937721608)
+    sctter_ori.set_ylim(min=30.2601162000, max=30.26024044069797)
+
+    # sctter_fit.set_xlim(min=-89.0815852770, max=-89.0815450572)
+    # sctter_fit.set_ylim(min=30.2601181123, max=30.2601379353)
+
+    for i in range(1, 50):
+        print((lng[i], lat[i]))
+        fitted_data = heading(x=[lat[i], lng[i], ''.join(tme[i].split(':'))], y=9)
+        sctter_ori.add_data_to_artist((lng[i], lat[i]))
+        print(fitted_data)
+        sctter_fit_a.add_data_to_artist((fitted_data['lng1'], fitted_data['lat1']))
+        sctter_fit_b.add_data_to_artist((fitted_data['lng2'], fitted_data['lat2']))
+        time.sleep(1)
+
+
+def _quit():
+    root.quit()
+    root.destroy()
+
+
+if __name__ == '__main__':
+    import pandas as pd
+
+    logging.basicConfig(level=logging.INFO)  # print to console
+
+    root = tk.Tk()
+    root.wm_title("Test")
+    fig = plt.Figure(figsize=(6,6), dpi=100)
+    ax = fig.add_subplot(111)
+    # ax = fig.add_subplot(xlim=(, 2), ylim=(-1.1, 1.1))
+
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    toolbar = NavigationToolbar2Tk(canvas, root)
+    toolbar.update()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    button = tk.Button(master=root, text="Quit", command=_quit)
+    button.pack(side=tk.BOTTOM)
+
+    gal = ag.Gallerist(ax, fig)
+
+    threading.Thread(target=test_fit, daemon=True).start()
+
+    # Using init function is much faster in terms of updating but slower to rescale. It also is not stable!!!
+    anim = animation.FuncAnimation(gal.fig, gal.animate, init_func=gal.init_func, interval=100, blit=True)
+    tk.mainloop()
