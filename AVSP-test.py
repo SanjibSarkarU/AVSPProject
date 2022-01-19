@@ -7,8 +7,8 @@ import logging
 import socket
 from queue import Queue
 import artgallery as ag
-import fungnss
-import fungnss as fg
+import funcgnss
+import funcgnss as fg
 
 __author__ = 'Sanjib Sarkar'
 __copyright__ = ''
