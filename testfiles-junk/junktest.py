@@ -24,36 +24,41 @@ def heading(x, y):
     if not hasattr(heading, 'data'):
         heading.data = np.empty((y, len(x))) * np.nan
         heading.count = 0
-        heading.e = heading.n = heading.u = np.empty(y) * np.nan
+        # heading.e = heading.n = heading.u = np.empty(y) * np.nan
         heading.h = np.zeros(y)
     heading.data[0] = x
+    e = n = u = np.empty(heading.count+1) * np.nan
     al = 0
+    # heading.lat0, heading.ln0 = heading.data[heading.count][0], heading.data[heading.count][1]
+    # e, n, u = pm.geodetic2enu(heading.data[0:heading.count+1][0], heading.data[0:heading.count+1][1], heading.h[heading.count],
+    #     heading.lat0, heading.ln0, heading.h[heading.count], ell=None, deg=True)
     while al <= heading.count:
         heading.lat0, heading.ln0 = heading.data[heading.count][0], heading.data[heading.count][1]
         ' Convert to cartesian coordinate'
-        heading.e[0], heading.n[0], heading.u[0] = pm.geodetic2enu(
-            heading.data[0][0], heading.data[0][1], heading.h[heading.count],
+        e[0], n[0], u[0] = pm.geodetic2enu(
+            heading.data[al][0], heading.data[al][1], heading.h[heading.count],
             heading.lat0, heading.ln0, heading.h[heading.count], ell=None, deg=True)
-        heading.e = np.roll(heading.e, 1)
-        heading.n = np.roll(heading.n, 1)
-        heading.u = np.roll(heading.u, 1)
+        e = np.roll(e, 1)
+        n = np.roll(n, 1)
+        u = np.roll(u, 1)
         al += 1
+    print('e::::', e)
     lat1, lng1 = heading.data[0][0], heading.data[0][1]
     lat2, lng2 = heading.data[heading.count][0], heading.data[heading.count][1]
 
     if heading.count > 2:
-        p1 = np.array([heading.e[0], heading.n[0]])
-        p2 = np.array([heading.e[heading.count], heading.n[heading.count]])
-        # heading.e = heading.e[~np.isnan(heading.e)]
-        # heading.n = heading.n[~np.isnan(heading.n)]
+        p2 = np.array([e[0], n[0]])
+        p1 = np.array([e[heading.count], n[heading.count]])
+        # e = np.array(heading.e[~np.isnan(heading.e)])
+        # n = np.array(heading.n[~np.isnan(heading.n)])
+        # print('e', e)
         ' Apply linear regression'
-        slope, intercept, r_value, p_value, std_err = stats.linregress(np.array(heading.e[0:heading.count]),
-                                                                       np.array(heading.n[0:heading.count]))
+        slope, intercept, r_value, p_value, std_err = stats.linregress(e, n)
         # line = list(map(lambda b: intercept + slope * b, heading.e))
-        line = intercept + slope * heading.e
+        line = intercept + slope * e
         'perpendicular on the '
-        a = np.array([heading.e[0], line[0]])
-        b = np.array([heading.e[heading.count], line[heading.count]])
+        b = np.array([e[0], line[0]])
+        a = np.array([e[heading.count], line[heading.count]])
         x_1, y_1 = point_on_line(a, b, p1)
         x_2, y_2 = point_on_line(a, b, p2)
         'Back to the lat lng'
@@ -85,14 +90,14 @@ def heading(x, y):
 
 
 def test_fit():
-    daa = pd.read_csv('20220104-212027-UTC_0-CAT3-IVER3-3089.log', header=0, delimiter=';')
+    daa = pd.read_csv('../20220104-212027-UTC_0-CAT3-IVER3-3089.log', header=0, delimiter=';')
     lat = daa['Latitude']
     lng = daa['Longitude']
     tme = daa['Time']
 
-    sctter_ori = ag.ScatterArtist(gal, s=60, marker='o',  label='original location')
-    sctter_fit_a = ag.ScatterArtist(gal, s=60, marker='*', label='after fitting')
-    sctter_fit_b = ag.ScatterArtist(gal, s=60, marker='*', label='after fitting')
+    sctter_ori = ag.ScatterArtist(gal, s=40, marker='o',  label='original location')
+    sctter_fit_a = ag.ScatterArtist(gal, s=20, marker='*', c='r', label='after fitting')
+    sctter_fit_b = ag.ScatterArtist(gal, s=20, marker='X', alpha=0.5, label='after fitting')
     # sctter_ori.set_xlim(min=lng[0], max=lng[len(lng)-1])
     # sctter_ori.set_ylim(min=lat[0], max=lat[len(lat)-1])
     # sctter_ori.set_xlim(min=-89.0815868500, max=-89.08149442350692)
@@ -144,6 +149,5 @@ if __name__ == '__main__':
 
     threading.Thread(target=test_fit, daemon=True).start()
 
-    # Using init function is much faster in terms of updating but slower to rescale. It also is not stable!!!
     anim = animation.FuncAnimation(gal.fig, gal.animate, init_func=gal.init_func, interval=100, blit=True)
     tk.mainloop()
