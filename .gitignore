@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 !/Cat_Island_ENC.tif
 !/Cat_Island_Low_2.tif
+!/testfiles-junk/20220104_174722.csv
