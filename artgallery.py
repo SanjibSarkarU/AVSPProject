@@ -12,12 +12,12 @@ import threading
 import queue
 import logging
 import time
-from matplotlib import pyplot as plt
-from matplotlib import transforms
 import rasterio
 from bisect import bisect
-
-
+from matplotlib import pyplot as plt
+from matplotlib import transforms
+from matplotlib import animation
+from matplotlib import artist
 
 __author__ = 'Gero Nootz'
 __copyright__ = ''
@@ -31,7 +31,6 @@ __status__ = 'Prototype'
 
 lock = threading.Lock()
 
-
 class Add_del_art(Enum):
     add_to_animation_func = auto()
     add_to_init_func = auto()
@@ -40,12 +39,11 @@ class Add_del_art(Enum):
 
 class Gallerist(queue.Queue):
     """
-    manages objects of type Artist(ABC) to plot artists to 
-    matplotlib.animation.FuncAnimation, e.g.:
-    animation.FuncAnimation(gallerist.fig, gallerist.animate, frames=gallerist.gallery(), ...)
+    manages objects of type Artist(ABC) to animate via 
+    matplotlib.animation.FuncAnimation.    
     When Artist(ABC) gos out to scope, the artist is deleted from the list of artists. 
     """
-    def __init__(self, ax: plt.axes, fig: plt.figure):
+    def __init__(self, ax: plt.axes, fig: plt.figure, **kwarks):
         self.ax = ax
         self.fig = fig
         self.animation_artists = []
@@ -56,6 +54,10 @@ class Gallerist(queue.Queue):
         self.init_artist_ids = []
         self.q_art = queue.Queue()
         threading.Thread(target=self.__art_manager, daemon = True).start()
+        self.anim = animation.FuncAnimation(self.fig,
+                                    self.animate,
+                                    init_func=self.init_func,
+                                    blit=True, **kwarks)
     
     def __art_manager(self):
         """
@@ -118,6 +120,9 @@ class Gallerist(queue.Queue):
         Returns a list of artists to be animated in matplotlib.animation.FuncAnimation
         -> returns a list of artists
         """
+        with lock:
+            pass # lock until update by append_data_to_artist() is complete
+   
         return self.animation_artists   
 
             
@@ -126,8 +131,9 @@ class Gallerist(queue.Queue):
         Returns a list of artists to initialize matplotlib.animation.FuncAnimation
         -> returns a list of artists
         """
-        print('init_func called')
-        # print(self.init_artists)
+        with lock:
+            pass # lock until update by append_data_to_artist() is complete
+        logging.info('artgallery.init_func called')  
         return self.init_artists
 
 class Artist(ABC):
@@ -152,7 +158,7 @@ class Artist(ABC):
             self.add_or_del_artist = Add_del_art.add_to_animation_func
 
         self.artist_exsits = False
-        self.q_art.put(self)
+        self.q_art.put(self) # notify Gallerist that a new artist was instantiated
         while self.artist_exsits == False: # wait for artist creation by gallerist
             time.sleep(0.1)
 
@@ -162,24 +168,27 @@ class Artist(ABC):
         else:
             self.add_or_del_artist = Add_del_art.delete_from_animation_func
 
-        self.q_art.put(self)
+        self.q_art.put(self) # notify Gallerist that a artist is getting deleted
         while self.artist_exsits == True: #wait for deletion of artist by gallerist
             time.sleep(0.1)   
 
     @abstractmethod
     def create_artist(self):
-        """ Create artist of varius types """
-        
+        """ Create artist of varius types -> artist"""        
 
     @abstractmethod
-    def add_data_to_artist(self, new_data) -> None:
-        """ add new data to artist """
-        
+    def add_data_to_artist(self, data) -> None:
+        """ add new data to artist
+        all privous data is discarded """   
+             
+
+    @abstractmethod
+    def append_data_to_artist(self, new_data) -> None:
+        """ append new data to artist """        
 
     @abstractmethod
     def clear_data(self)-> None:
-        """Clear all data from artist"""
-        
+        """Clear all data from artist"""        
 
     def register_ax(self, ax: plt.axes):
             self.ax = ax
@@ -202,9 +211,9 @@ class Artist(ABC):
 
 class ImageArtist(Artist):
     """ 
-    Create an image artist and send the artist_maager() function.
+    Create an image artist and send to __art_manger() method of a Gallerist object.
     Manipulate the data from within a thread using the methods provided, e.g., 
-    add_data_to_artist()
+    append_data_to_artist()
     """
 
     def create_artist(self):
@@ -218,56 +227,84 @@ class ImageArtist(Artist):
         
         Add data to artist    
         """
-        self.size = size
-        left, right = self.ax.get_xlim() 
-        bottom, top = self.ax.get_ylim()
+        with lock: # prevent animation while updating
+            self.size = size
+            left, right = self.ax.get_xlim() 
+            bottom, top = self.ax.get_ylim()
 
-        del_x = (right - left)*self.size
-        del_y = (top - bottom)*self.size
-        aspect = del_x/del_y  
-        aspect = 1 
-        left = -del_x + position[0]
-        right = del_x + position[0]
-        bottom = -del_x*aspect + position[1]
-        top = del_x*aspect + position[1]
-        # print('LRBT1: ', left, right, bottom, top)     
-        trans_data = transforms.Affine2D().rotate_deg_around(
-            position[0], position[1], deg) + self.ax.transData
-        self.artist.set_transform(trans_data)  
-        plt.setp(self.artist, extent=(left, right, bottom, top))
-        self.image = plt.imread(fname)
-        self.artist.set_array(self.image)
+            del_x = (right - left)*self.size
+            del_y = (top - bottom)*self.size
+            aspect = del_x/del_y  
+            aspect = 1 
+            left = -del_x + position[0]
+            right = del_x + position[0]
+            bottom = -del_x*aspect + position[1]
+            top = del_x*aspect + position[1]
+            # print('LRBT1: ', left, right, bottom, top)     
+            trans_data = transforms.Affine2D().rotate_deg_around(
+                position[0], position[1], deg) + self.ax.transData
+            self.artist.set_transform(trans_data)  
+            plt.setp(self.artist, extent=(left, right, bottom, top))
+            self.image = plt.imread(fname)
+            self.artist.set_array(self.image)
+
+    def append_data_to_artist(self, fname: str, size: float, position, deg: float):
+        """ 
+        !!!!!!!!!! Cleanup requierd !!!!!!!!!!!!!!!!
+        
+        Add data to artist    
+        """
+        with lock: # prevent animation while updating
+            self.size = size
+            left, right = self.ax.get_xlim() 
+            bottom, top = self.ax.get_ylim()
+
+            del_x = (right - left)*self.size
+            del_y = (top - bottom)*self.size
+            aspect = del_x/del_y  
+            aspect = 1 
+            left = -del_x + position[0]
+            right = del_x + position[0]
+            bottom = -del_x*aspect + position[1]
+            top = del_x*aspect + position[1]
+            # print('LRBT1: ', left, right, bottom, top)     
+            trans_data = transforms.Affine2D().rotate_deg_around(
+                position[0], position[1], deg) + self.ax.transData
+            self.artist.set_transform(trans_data)  
+            plt.setp(self.artist, extent=(left, right, bottom, top))
+            self.image = plt.imread(fname)
+            self.artist.set_array(self.image)        
     
     def set_position(self, position, deg):
-        # print('pos: ', position)
-        left, right = self.ax.get_xlim() 
-        bottom, top = self.ax.get_ylim()
+        with lock: # prevent animation while updating
+            # print('pos: ', position)
+            left, right = self.ax.get_xlim() 
+            bottom, top = self.ax.get_ylim()
 
-        del_x = (right - left)*self.size
-        del_y = (top - bottom)*self.size
-        aspect = del_x/del_y         
-        aspect = 1 
-        left = -del_x + position[0]
-        right = del_x + position[0]
-        bottom = -del_x*aspect + position[1]
-        top = del_x*aspect + position[1]
+            del_x = (right - left)*self.size
+            del_y = (top - bottom)*self.size
+            aspect = del_x/del_y         
+            aspect = 1 
+            left = -del_x + position[0]
+            right = del_x + position[0]
+            bottom = -del_x*aspect + position[1]
+            top = del_x*aspect + position[1]
 
-        trans_data = transforms.Affine2D().rotate_deg_around(
-            position[0], position[1], deg) + self.ax.transData
-        self.artist.set_transform(trans_data)
-        # print('LRBT: ', left, right, bottom, top)
-        plt.setp(self.artist, extent=(left, right, bottom, top))
-        
+            trans_data = transforms.Affine2D().rotate_deg_around(
+                position[0], position[1], deg) + self.ax.transData
+            self.artist.set_transform(trans_data)
+            # print('LRBT: ', left, right, bottom, top)
+            plt.setp(self.artist, extent=(left, right, bottom, top))
         
     def clear_data(self):
-        self.artist.set_array([[]])
-        pass
+        with lock: # prevent animation while updating
+            self.artist.set_array([[]])
 
 class GeoTifArtist(Artist):
     """ 
-    Create an GeoTif artist and send the artist_maager() function.
+    Create an GeoTif artist and send to __art_manger() method of a Gallerist object.
     Manipulate the data from within a thread using the methods provided, e.g., 
-    add_data_to_artist()
+    append_data_to_artist()
     """
     
     def create_artist(self):
@@ -275,28 +312,35 @@ class GeoTifArtist(Artist):
             0, 1, 0, 1), origin='upper', animated=True, aspect='equal', **self.kwargs)
         return self.artist
 
-    def add_data_to_artist(self, fname: str):
-        with rasterio.open(fname, driver='GTiff') as geotif: 
-            if geotif.crs != 'EPSG:4326':
-                logging.error('the file origon of %s is not EPSG:4326', fname)
-                raise Warning('the file origon of the geotif is not EPSG:4326')  
-            self.geotif_xlim=(geotif.bounds.left, geotif.bounds.right)
-            self.geotif_ylim=(geotif.bounds.bottom, geotif.bounds.top)
-            rgb = np.dstack((geotif.read(1), geotif.read(2), geotif.read(3)))
-        
-        plt.setp(self.artist, extent=(
-            geotif.bounds.left, geotif.bounds.right, geotif.bounds.bottom, geotif.bounds.top))
-        self.artist.set_array(rgb)
+    def add_data_to_artist(self, data) -> None:
+        """ add new data to artist
+        all privous data is discarded """   
+        pass
+    
+    def append_data_to_artist(self, fname: str):
+        with lock: # prevent animation while updating
+            with rasterio.open(fname, driver='GTiff') as geotif: 
+                if geotif.crs != 'EPSG:4326':
+                    logging.error('the file origon of %s is not EPSG:4326', fname)
+                    raise Warning('the file origon of the geotif is not EPSG:4326')  
+                self.geotif_xlim=(geotif.bounds.left, geotif.bounds.right)
+                self.geotif_ylim=(geotif.bounds.bottom, geotif.bounds.top)
+                rgb = np.dstack((geotif.read(1), geotif.read(2), geotif.read(3)))
+            
+            plt.setp(self.artist, extent=(
+                geotif.bounds.left, geotif.bounds.right, geotif.bounds.bottom, geotif.bounds.top))
+            self.artist.set_array(rgb)
     
     def clear_data(self):
-        self.artist.set_array([[]])
-        pass
+        with lock: # prevent animation while updating
+            self.artist.set_array([[]])
+            
 
 class ScatterArtist(Artist):
     """
-    Create a scatter artist and send to the artist_manger() function.
+    Create a scatter artist and send to __art_manger() method of a Gallerist object.
     Manipulate the data from within a thread using the methods provided, e.g., 
-    add_data_to_artist()
+    append_data_to_artist()
     """
 
     def create_artist(self):
@@ -304,21 +348,38 @@ class ScatterArtist(Artist):
         self.artist = self.ax.scatter([], [], animated=True, **self.kwargs)
         return self.artist
 
-    def add_data_to_artist(self, new_data):
-        self.art_data = np.vstack(
-            [self.art_data, [[new_data[0], new_data[1]]]])
+    def add_data_to_artist(self, data: np.array, **kwargs) -> None:
+        """Add new data to artist.
+        All privous data is discarded """   
+        row, col = data.shape
+        if col != 2:
+            raise ValueError(f'input has dimension ({row}, {col}) but dimension (n, 2) is required')
+        self.art_data = data
+        # print(artist.get(self.artist))
         self.artist.set_offsets(self.art_data)
+        if 'facecolors' in kwargs:
+            self.artist.set_facecolors(kwargs.get("facecolors"))
+            
+
+
+    def append_data_to_artist(self, new_data):
+        # print(np.shape(new_data))
+        with lock: # prevent animation while updating
+            self.art_data = np.vstack(
+                [self.art_data, [[ new_data[0], new_data[1] ]] ])
+            self.artist.set_offsets(self.art_data)
 
     def clear_data(self):
-        self.art_data = np.array([], dtype=float).reshape(
-            0, 2)  # prepare (N,2) array
-        self.artist.set_offsets(self.art_data)
+        with lock: # prevent animation while updating
+            self.art_data = np.array([], dtype=float).reshape(
+                0, 2)  # prepare (N,2) array
+            self.artist.set_offsets(self.art_data)
 
 class LineArtist(Artist):
     """ 
-    Create a line plot artist and send to artist_manger() function.
+    Create a line plot artist and send to __art_manger() method of a Gallerist object.
     Manipulate the data from within a thread using the methods provided, e.g., 
-    add_data_to_artist()
+    append_data_to_artist()
     """
 
     def create_artist(self):
@@ -326,15 +387,23 @@ class LineArtist(Artist):
         self.artist, = self.ax.plot([], [], animated=True, **self.kwargs)
         return self.artist
 
-    def add_data_to_artist(self, new_data):
-        self.art_data = np.vstack(
-            [self.art_data, [[new_data[0], new_data[1]]]])
-        self.artist.set_data(self.art_data[:, 0], self.art_data[:, 1])
+    def add_data_to_artist(self, data) -> None:
+        """ add new data to artist
+        all privous data is discarded """   
+        pass    
+
+    def append_data_to_artist(self, new_data):
+        with lock: # prevent animation while updating (works so so)
+            self.art_data = np.append(
+                self.art_data, [new_data], axis=0)            
+            # The program crashes when the array is updated while being plotted
+            self.artist.set_data(self.art_data[:, 0], self.art_data[:, 1])
 
     def clear_data(self):
-        self.art_data = np.array([], dtype=float).reshape(
-            0, 2)  # prepare (N,2) array
-        self.artist.set_data(self.art_data[:, 0], self.art_data[:, 1])
+        with lock: # prevent animation while updating
+            self.art_data = np.array([], dtype=float).reshape(
+                0, 2)  # prepare (N,2) array
+            self.artist.set_data(self.art_data[:, 0], self.art_data[:, 1])
 
 
 if __name__ == '__main__':
@@ -344,7 +413,7 @@ if __name__ == '__main__':
     import tkinter as tk
     from matplotlib.backends.backend_tkagg import (
         FigureCanvasTkAgg, NavigationToolbar2Tk)
-    from matplotlib import animation
+
 
     logging.basicConfig(level=logging.INFO) # print to console
     # logging.basicConfig(filename='main.log', encoding='utf-8', level=logging.DEBUG) # append to file
@@ -366,7 +435,7 @@ if __name__ == '__main__':
         time.sleep(10)
         """Work in progress..."""
         artist = GeoTifArtist(gal, label='GeoTif plot', zorder=(-1))
-        artist.add_data_to_artist('Stennis_QW.tif')
+        artist.append_data_to_artist('Stennis_QW.tif')
         artist.set_xlim(artist.geotif_xlim[0], artist.geotif_xlim[1])
         artist.set_ylim(artist.geotif_ylim[0], artist.geotif_ylim[1])
         while True: 
@@ -376,49 +445,72 @@ if __name__ == '__main__':
         """Work in progress..."""
         # image = plt.imread('yota.png')    
         artist = ImageArtist(gal, label='image plot')
-        artist.add_data_to_artist('yota.png', 0.1, (1,0), 0)
+        artist.append_data_to_artist('yota.png', 0.1, (1,0), 0)
         while True: 
             data = np.random.rand(2)    
             new_xy = (data[0]*2, data[1]*2 - 1) 
             artist.set_position(new_xy, np.random.rand()*360)
             time.sleep(1)            
 
-    def plot_rand_line(): 
-        """ 
-        Demonstrate how to plot a line artist from a thread
-        """
-        delay = np.random.rand()*10    
-        sleep = np.random.rand() 
     
-        artist = LineArtist(gal, label='line plot', zorder=10)
-        logging.debug('createdg artist %i for provide_line1', id(artist))
+    class PlotRandLine(threading.Thread):
+        def __init__(self):
+            threading.Thread.__init__(self, daemon=True)
 
-        time.sleep(delay)   
+        def run(self): 
+            delay = np.random.rand()*10    
+            sleep = np.random.rand() 
+        
+            artist = LineArtist(gal, label='line plot', zorder=10)
+            logging.debug('createdg artist %i for provide_line1', id(artist))
 
-        i = 0
-        while True:        
-            data = np.random.rand(2)    
-            new_xy = (data[0]*2, data[1]*2 - 1) 
-            artist.add_data_to_artist(new_xy)
-            if i%10 == 0:
-                artist.clear_data()
-            i += 1
-            time.sleep(sleep)
+            time.sleep(delay)   
 
-    def plot_rand_scatter(): 
+            i = 0
+            while True:        
+                data = np.random.rand(2)    
+                new_xy = (data[0]*2, data[1]*2 - 1) 
+                artist.append_data_to_artist(new_xy)
+                if i%10 == 0:
+                    artist.clear_data()
+                i += 1
+                time.sleep(sleep)
+
+
+    class PlotRandScetter(threading.Thread):
+        def __init__(self):
+            threading.Thread.__init__(self, daemon=True)
+
+        def run(self): 
+            """ 
+            Demonstrates how to plot a scatter artist from a thread using
+            append_data_to_artist(new_xy)
+            """       
+            scatter_artist = ScatterArtist(gal, s=60, marker='^', label='scatter plot')
+            while True:        
+                data = np.random.rand(10,2)
+                data[:, 1] = (data[:, 1] * 2) - 1
+                data[:, 0] = data[:, 0] * 2
+                scatter_artist.add_data_to_artist(data, facecolors=np.random.rand(10,4))
+                # self.artist.set_facecolors(np.random.rand(10,4))
+                time.sleep(1)     
+    
+
+    def animate_rand_scatter(): 
         """ 
-        Demonstrates how to plot a scatter artist from a thread
+        Demonstrates how to plot a scatter artist from a thread using
+        append_data_to_artist(new_xy)
         """
         delay = np.random.rand()*10    
         sleep = np.random.rand()         
-        scatter_artist = ScatterArtist(gal, s=60, marker='x', label='scatter plot')
-        logging.debug('createdg artist %i for provide_scatter1', id(scatter_artist))
+        scatter_artist = ScatterArtist(gal, s=60, marker='x', label='scatter plot animation')
+        logging.debug('createdg artist %i for animate_rand_scatter', id(scatter_artist))
         time.sleep(delay) 
         i = 0
         while True:        
             data = np.random.rand(2)    
             new_xy = (data[0]*2, data[1]*2-1) 
-            scatter_artist.add_data_to_artist(new_xy)
+            scatter_artist.append_data_to_artist(new_xy)
             if i%10 == 0:
                 scatter_artist.clear_data()
             i += 1
@@ -441,7 +533,7 @@ if __name__ == '__main__':
         for i in range(10):          
             data = np.random.rand(2)    
             new_xy = (data[0]*2, data[1]*2-1) 
-            scatter_artist.add_data_to_artist(new_xy)
+            scatter_artist.append_data_to_artist(new_xy)
             time.sleep(sleep)     
 
   
@@ -449,11 +541,10 @@ if __name__ == '__main__':
     root.wm_title("Update mpl in Tk via queue")
 
     fig = plt.Figure()
+
     ax = fig.add_subplot(xlim=(0, 2), ylim=(-1.1, 1.1))
     ax.set_xlabel('x-data')
     ax.set_ylabel('y-data')
-
-    gal = Gallerist(ax, fig)
 
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
@@ -463,17 +554,18 @@ if __name__ == '__main__':
 
     toolbar = NavigationToolbar2Tk(canvas, root, pack_toolbar=False)
     toolbar.update()
-    toolbar.pack(side=tk.BOTTOM, fill=tk.X)
-    
-    threading.Thread(target=plot_rand_line, daemon = True).start()        
+    toolbar.pack(side=tk.BOTTOM, fill=tk.X)     
+
+    gal = Gallerist(ax, fig, interval=10)
+
+    PlotRandLine().start()   # demonstrate class container 
     threading.Thread(target=plot_temp_scatter, daemon = True).start()        
-    threading.Thread(target=plot_rand_scatter, daemon = True).start()        
+    threading.Thread(target=animate_rand_scatter, daemon = True).start()        
     threading.Thread(target=plot_image, daemon = True).start()   
     threading.Thread(target=plot_geotif, args=(gal,), daemon = True).start()   
+    PlotRandScetter().start()
 
-
-    anim = animation.FuncAnimation(gal.fig, gal.animate, interval=500, blit=True, save_count=0, cache_frame_data=False)
-
-    threading.Thread(target=holdani, args=(anim,), daemon = True).start()   
+    # demonstrate pausing the animation
+    # threading.Thread(target=holdani, args=(gal.anim,), daemon = True).start()   
 
     tk.mainloop()
