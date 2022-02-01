@@ -63,7 +63,7 @@ def lvs():
         past_y_lat = latlng_lead[-2][0] if len(latlng_lead) > 2 else 0.00
         past_t = latlng_lead[-2][2] if len(latlng_lead) > 2 else 0.00
         past_xy = (past_y_lat, past_x_lng, past_t)
-        deg_ = fungnss.speed_heading_cal(past_xy, new_xy)
+        deg_ = funcgnss.speed_heading_cal(past_xy, new_xy)
         deg = deg_['ha']  # 65  * (math.cos(2 * (math.pi / x_range) * (x_pos - iver_art.ax.get_xlim()[0])) - 90)
         print('Ha:', deg)
         iver_art.set_position((new_x_lng, new_y_lat), deg=10)
