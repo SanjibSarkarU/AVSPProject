@@ -44,7 +44,7 @@ def ddm2dd(coordinates) -> dict:
     return dd
 
 
-def gpglldecode(gpgllstr: str) -> dict:
+def gpglldecode(gpgllstr: str):
     """"Takes GPGLL string and returns degree decimal
     input: '$GPGLL,3021.0378,N,08937.806599999999996,W,104129,A,A*6E'
     return: {'Lat_dd': float, 'Lng_dd': float}"""
@@ -60,11 +60,14 @@ def gpglldecode(gpgllstr: str) -> dict:
                 return dd
             else:
                 print('fungnss>gpglldecode> The status is not VALID')
+                return None
         else:
             print('fungnss>gpglldecode> this is not a GPGLL string')
+            return None
     else:
         print("fungnss>gpglldecode>Wrong CheckSum: received checkSum{}, calculated checkSum{}".format(
             gpgllstr.split('*')[-1], check_sum(gpgllstr.split('*')[0] + '*')))
+        return None
 
 
 def dd2ddm(coordinates):
