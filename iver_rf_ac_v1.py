@@ -35,15 +35,6 @@ iver = '3089'
 send_through_rf_every = 2  # int(input('How often send OSD through RF in sec: '))
 send_through_ac_every = 25  # int(input('How often send OSD through AC in sec: '))
 
-# UDP_IP = "192.168.168.3"
-# UDP_PORT = 5014
-
-UDP_IP = 'localhost'
-UDP_PORT = 10000
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.bind((UDP_IP, UDP_PORT))
 
 
 class LeadV(threading.Thread):
